@@ -7,6 +7,7 @@ hook_mode="${BOUNDED_OUTPUT_HOOK_MODE:-block}"
 payload="$(cat)"
 command_text="$payload"
 codex_bin_dir="${HOME:?HOME is required}/.codex/bin"
+max_command_chars="${BOUNDED_OUTPUT_HOOK_COMMAND_CHARS:-220}"
 
 if command -v jq >/dev/null 2>&1; then
   extracted="$(printf '%s' "$payload" | jq -r '.tool_input.command // .tool_input.cmd // .command // empty' 2>/dev/null || true)"
@@ -75,6 +76,11 @@ fi
 
 [ -n "$risk" ] || exit 0
 
+command_preview="$command_text"
+if [ "${#command_preview}" -gt "$max_command_chars" ]; then
+  command_preview="${command_preview:0:$max_command_chars}..."
+fi
+
 label="BOUNDED_OUTPUT_BLOCKED"
 exit_code=2
 if [ "$hook_mode" = "warn" ]; then
@@ -89,29 +95,21 @@ $label: detected $risk.
 Use a bounded preview command instead of the raw command.
 Suggested:
   $preview_hint
-Fallback scan:
-  $codex_bin_dir/bounded-preview scan <file-or-log> [query...]
 Original command:
-  $command_text
-Bypass only when output is known to be small:
-  BOUNDED_OUTPUT_DISABLE_HOOK=1 <command>
-Warn-only mode for the Codex session:
-  set BOUNDED_OUTPUT_HOOK_MODE=warn in the Codex environment or config
+  $command_preview
+Fallback: $codex_bin_dir/bounded-preview scan <file-or-log> [query...]
+Bypass: BOUNDED_OUTPUT_DISABLE_HOOK=1 <command>
 EOF
     return
   fi
   cat <<EOF
 $label: detected $risk.
 Use bounded output instead:
-  $codex_bin_dir/bounded-exec --scope "<smallest useful scope>" -- $command_text
-Fallback scan:
-  $codex_bin_dir/bounded-preview scan <file-or-log> [query...]
+  $codex_bin_dir/bounded-exec --scope "<smallest useful scope>" -- bash -lc '<original command>'
 Original command:
-  $command_text
-Bypass only when output is known to be small:
-  BOUNDED_OUTPUT_DISABLE_HOOK=1 <command>
-Warn-only mode for the Codex session:
-  set BOUNDED_OUTPUT_HOOK_MODE=warn in the Codex environment or config
+  $command_preview
+Fallback: $codex_bin_dir/bounded-preview scan <file-or-log> [query...]
+Bypass: BOUNDED_OUTPUT_DISABLE_HOOK=1 <command>
 EOF
 }
 
