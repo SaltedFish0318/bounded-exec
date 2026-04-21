@@ -47,15 +47,18 @@
 - `~/.codex/bin/bounded-preview`
 - `~/.codex/bin/bounded-output-hook`
 
-如果 `~/.codex/hooks.json` 中存在当前项目安装的那条 bounded-output `PreToolUse` Bash hook，卸载脚本也会一并把它移除。
+如果这些精确的 bounded-output 管理项存在，卸载脚本也会一并移除：
+
+- `~/.codex/hooks.json` 中的 bounded-output `PreToolUse` Bash hook
+- `~/.codex/AGENTS.md` 中的 `<bounded_output_global> ... </bounded_output_global>` 整块
+- `~/.codex/config.toml` 中的 `BOUNDED_OUTPUT_HOOK_MODE = "block"`
 
 它不会删除：
 
 - 当前项目目录本身
 - `~/.codex/logs/bounded-output/`
 - `install.sh` 产生的 `*.backup.*` 备份文件
-- `~/.codex/AGENTS.md` 里的手工 bounded-output 规则
-- `~/.codex/config.toml` 里的手工 bounded-output 配置项
+- 这些精确管理项以外的其它手工 bounded-output 修改
 
 ## 基本用法
 

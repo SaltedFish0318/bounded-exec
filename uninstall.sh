@@ -9,8 +9,13 @@ agents_skill_dir="$home_dir/.agents/skills/$skill_name"
 codex_skill_dir="$home_dir/.codex/skills/$skill_name"
 codex_bin_dir="$home_dir/.codex/bin"
 hooks_json_path="$home_dir/.codex/hooks.json"
+agents_md_path="$home_dir/.codex/AGENTS.md"
+config_toml_path="$home_dir/.codex/config.toml"
 bounded_hook_command="bash -lc 'exec \"\$HOME/.codex/bin/bounded-output-hook\"'"
 bounded_hook_status="Checking bounded-output risk"
+bounded_agents_start="<bounded_output_global>"
+bounded_agents_end="</bounded_output_global>"
+bounded_config_line='BOUNDED_OUTPUT_HOOK_MODE = "block"'
 
 remove_link_if_owned() {
   target="$1"
@@ -74,7 +79,49 @@ remove_bounded_hook_entry() {
   printf 'Removed bounded-output hook entry from %s\n' "$hooks_json_path"
 }
 
+remove_bounded_agents_block() {
+  if [ ! -f "$agents_md_path" ]; then
+    printf 'Skip: %s does not exist\n' "$agents_md_path"
+    return 0
+  fi
+
+  if ! grep -Fq "$bounded_agents_start" "$agents_md_path"; then
+    printf 'Skip: bounded-output AGENTS block not present in %s\n' "$agents_md_path"
+    return 0
+  fi
+
+  tmp_md="$(mktemp "${TMPDIR:-/tmp}/bounded-output-agents.XXXXXX")"
+  awk -v start="$bounded_agents_start" -v end="$bounded_agents_end" '
+    $0 == start { skip=1; removed=1; next }
+    skip && $0 == end { skip=0; next }
+    !skip { print }
+    END { if (!removed) exit 1 }
+  ' "$agents_md_path" > "$tmp_md"
+  perl -0pi -e 's/\n{3,}/\n\n/g' "$tmp_md"
+  mv "$tmp_md" "$agents_md_path"
+  printf 'Removed bounded-output AGENTS block from %s\n' "$agents_md_path"
+}
+
+remove_bounded_config_entry() {
+  if [ ! -f "$config_toml_path" ]; then
+    printf 'Skip: %s does not exist\n' "$config_toml_path"
+    return 0
+  fi
+
+  if ! grep -Fq "$bounded_config_line" "$config_toml_path"; then
+    printf 'Skip: bounded-output config entry not present in %s\n' "$config_toml_path"
+    return 0
+  fi
+
+  tmp_toml="$(mktemp "${TMPDIR:-/tmp}/bounded-output-config.XXXXXX")"
+  awk -v needle="$bounded_config_line" '$0 != needle { print }' "$config_toml_path" > "$tmp_toml"
+  mv "$tmp_toml" "$config_toml_path"
+  printf 'Removed bounded-output config entry from %s\n' "$config_toml_path"
+}
+
 remove_bounded_hook_entry
+remove_bounded_agents_block
+remove_bounded_config_entry
 
 cat <<EOF
 Uninstalled bounded-output Codex skill symlinks owned by this project.
@@ -83,5 +130,5 @@ Not removed:
   $project_dir
   $home_dir/.codex/logs/bounded-output/
   Any *.backup.* files created during install
-  Any manual bounded-output edits in $home_dir/.codex/AGENTS.md or $home_dir/.codex/config.toml
+  Any other manual bounded-output edits outside the exact hook/config/AGENTS markers owned by this project
 EOF
