@@ -23,6 +23,9 @@ case "$command_text" in
 esac
 
 risk=""
+preview_hint=""
+search_command_part="${command_text%%|*}"
+search_command_part="${search_command_part%%2>*}"
 case " $command_text " in
   *" tail -f "*|*" journalctl -f "*|*" docker logs -f "*|*" kubectl logs -f "*)
     risk="continuous log stream"
@@ -41,6 +44,35 @@ case " $command_text " in
     ;;
 esac
 
+case " $command_text " in
+  *" grep -R "*|*" grep -r "*|*" rg "*)
+    preview_hint="$codex_bin_dir/bounded-preview rg '<pattern>' <path...>"
+    ;;
+  *" cat "*)
+    preview_hint="$codex_bin_dir/bounded-preview head <file>"
+    ;;
+  *" tail -f "*|*" docker logs"*|*" kubectl logs"*|*" journalctl"*)
+    preview_hint="$codex_bin_dir/bounded-preview tail <file-or-saved-log>"
+    ;;
+esac
+
+if [ "$preview_hint" = "$codex_bin_dir/bounded-preview rg '<pattern>' <path...>" ]; then
+  case " $search_command_part " in
+    *" grep -R "*|*" grep -r "*)
+      pattern="$(printf '%s\n' "$search_command_part" | sed -n 's/.*grep -[Rr][[:space:]]*"\([^"]*\)".*/\1/p')"
+      [ -n "$pattern" ] || pattern="$(printf '%s\n' "$search_command_part" | sed -n "s/.*grep -[Rr][[:space:]]*'\\([^']*\\)'.*/\\1/p")"
+      paths="$(printf '%s\n' "$search_command_part" | sed 's/.*grep -[Rr][[:space:]]*["'\''][^"'\'']*["'\''][[:space:]]*//; s/^-n[[:space:]]*//; s/[[:space:]]-n[[:space:]]/ /g; s/[[:space:]]-n$//; s/[[:space:]]*$//')"
+      if [ -n "$pattern" ] && [ -n "$paths" ]; then
+        preview_hint="$codex_bin_dir/bounded-preview rg \"$pattern\" $paths"
+      fi
+      ;;
+    *" rg "*)
+      rg_args="$(printf '%s\n' "$search_command_part" | sed 's/.*rg[[:space:]]*//')"
+      [ -n "$rg_args" ] && preview_hint="$codex_bin_dir/bounded-preview rg $rg_args"
+      ;;
+  esac
+fi
+
 [ -n "$risk" ] || exit 0
 
 label="BOUNDED_OUTPUT_BLOCKED"
@@ -51,13 +83,31 @@ if [ "$hook_mode" = "warn" ]; then
 fi
 
 emit_reason() {
+  if [ -n "$preview_hint" ]; then
+    cat <<EOF
+$label: detected $risk.
+Use a bounded preview command instead of the raw command.
+Suggested:
+  $preview_hint
+Fallback scan:
+  $codex_bin_dir/bounded-preview scan <file-or-log> [query...]
+Original command:
+  $command_text
+Bypass only when output is known to be small:
+  BOUNDED_OUTPUT_DISABLE_HOOK=1 <command>
+Warn-only mode for the Codex session:
+  set BOUNDED_OUTPUT_HOOK_MODE=warn in the Codex environment or config
+EOF
+    return
+  fi
   cat <<EOF
-$label: detected $risk. Use bounded output instead:
+$label: detected $risk.
+Use bounded output instead:
   $codex_bin_dir/bounded-exec --scope "<smallest useful scope>" -- $command_text
-For files/logs/searches:
-  $codex_bin_dir/bounded-preview tail <file>
-  $codex_bin_dir/bounded-preview scan <file> [query...]
-
+Fallback scan:
+  $codex_bin_dir/bounded-preview scan <file-or-log> [query...]
+Original command:
+  $command_text
 Bypass only when output is known to be small:
   BOUNDED_OUTPUT_DISABLE_HOOK=1 <command>
 Warn-only mode for the Codex session:
