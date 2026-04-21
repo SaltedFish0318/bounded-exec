@@ -1,0 +1,139 @@
+#!/usr/bin/env bash
+set -u
+
+usage() {
+  cat <<'EOF'
+Usage:
+  bounded-exec [--scope TEXT] [--kind TEXT] [--log-dir DIR] [--tail N] -- COMMAND [ARGS...]
+
+Runs COMMAND with stdout/stderr captured to a timestamped log and prints a compact OP_SUMMARY.
+EOF
+}
+
+scope="unspecified"
+kind="auto"
+tail_lines="${BOUNDED_EXEC_TAIL_LINES:-40}"
+log_dir="${BOUNDED_OUTPUT_LOG_DIR:-$HOME/.codex/logs/bounded-output}"
+preview_bin="${BOUNDED_PREVIEW_BIN:-$HOME/.codex/bin/bounded-preview}"
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --scope)
+      [ "$#" -ge 2 ] || { usage >&2; exit 2; }
+      scope="$2"
+      shift 2
+      ;;
+    --kind)
+      [ "$#" -ge 2 ] || { usage >&2; exit 2; }
+      kind="$2"
+      shift 2
+      ;;
+    --log-dir)
+      [ "$#" -ge 2 ] || { usage >&2; exit 2; }
+      log_dir="$2"
+      shift 2
+      ;;
+    --tail)
+      [ "$#" -ge 2 ] || { usage >&2; exit 2; }
+      tail_lines="$2"
+      shift 2
+      ;;
+    --help|-h)
+      usage
+      exit 0
+      ;;
+    --)
+      shift
+      break
+      ;;
+    *)
+      break
+      ;;
+  esac
+done
+
+[ "$#" -gt 0 ] || { usage >&2; exit 2; }
+
+mkdir -p "$log_dir" || exit 2
+
+ts="$(date +%Y%m%dT%H%M%S)"
+safe_kind="$(printf '%s' "$kind" | tr -c '[:alnum:]_.-' '_')"
+log_path="$log_dir/${ts}_${safe_kind}_$$.log"
+meta_path="$log_path.meta"
+
+cmd_raw="$*"
+cmd_display="$(printf '%q ' "$@")"
+cmd_display="${cmd_display% }"
+
+detect_kind() {
+  detection_text=" $* "
+  case "$detection_text" in
+    *" mvn "*|*" gradle "*|*" ./gradlew "*|*" bazel "*|*" make "*|*" ninja "*|*" cargo "*|*" go test "*|*" pytest "*|*" npm test "*|*" pnpm test "*|*" yarn test "*)
+      printf '%s' "build-test"
+      ;;
+    *" npm install "*|*" pnpm install "*|*" yarn install "*|*" cargo fetch "*|*" pip install "*|*" go mod tidy "*|*" mvn dependency:"*)
+      printf '%s' "dependency"
+      ;;
+    *" docker build "*|*" docker compose build "*|*" docker logs "*|*" kubectl logs "*|*" journalctl "*|*" systemctl status "*)
+      printf '%s' "infra-log"
+      ;;
+    *" tail -f "*|*" find "*|*" grep "*|*" rg "*|*" tar "*|*" unzip "*|*" curl "*|*" wget "*)
+      printf '%s' "large-output-risk"
+      ;;
+    *)
+      printf '%s' "command"
+      ;;
+  esac
+}
+
+if [ "$kind" = "auto" ]; then
+  cmd_detection="$(printf '%s\n%s\n' "$cmd_raw" "$cmd_display" | sed 's/\\ / /g; s/\\>/>/g; s/\\|/|/g; s/\\;/;/g')"
+  kind="$(detect_kind "$cmd_detection")"
+fi
+
+start_epoch="$(date +%s)"
+{
+  printf 'bounded-exec started_at=%s\n' "$(date -Is)"
+  printf 'scope=%s\n' "$scope"
+  printf 'kind=%s\n' "$kind"
+  printf 'command=%s\n\n' "$cmd_display"
+} > "$meta_path"
+
+export CI="${CI:-true}"
+export NO_COLOR="${NO_COLOR:-1}"
+export npm_config_progress="${npm_config_progress:-false}"
+export YARN_ENABLE_PROGRESS_BARS="${YARN_ENABLE_PROGRESS_BARS:-0}"
+export PIP_PROGRESS_BAR="${PIP_PROGRESS_BAR:-off}"
+export CARGO_TERM_COLOR="${CARGO_TERM_COLOR:-never}"
+export TERM="${TERM:-dumb}"
+
+"$@" > "$log_path" 2>&1
+exit_code=$?
+
+end_epoch="$(date +%s)"
+elapsed=$((end_epoch - start_epoch))
+
+first_error="$(
+  grep -n -m 1 -E '(^|[^[:alpha:]])(ERROR|Error|error|FAILED|Failed|failed|FAILURE|Failure|fatal|panic:|Exception|Traceback|BUILD FAILED|Compilation failed|npm ERR!|pytest.* failed)' "$log_path" 2>/dev/null || true
+)"
+first_error="${first_error//$'\n'/ | }"
+
+status="success"
+[ "$exit_code" -eq 0 ] || status="failed"
+
+if [ "$status" = "success" ]; then
+  printf 'OP_SUMMARY status=success kind=%s scope=%q elapsed_sec=%s exit_code=0 log_path=%q command=%q\n' "$kind" "$scope" "$elapsed" "$log_path" "$cmd_display"
+  exit 0
+fi
+
+printf 'OP_SUMMARY status=failed kind=%s scope=%q elapsed_sec=%s exit_code=%s log_path=%q command=%q\n' "$kind" "$scope" "$elapsed" "$exit_code" "$log_path" "$cmd_display"
+printf 'first_error=%s\n' "${first_error:-none-detected}"
+printf 'fallback_hint=%q\n' "$preview_bin --lines $tail_lines scan $log_path"
+if [ -z "$first_error" ] && [ -x "$preview_bin" ]; then
+  "$preview_bin" --lines "$tail_lines" scan "$log_path" || true
+fi
+printf 'tail_begin\n'
+tail -n "$tail_lines" "$log_path" 2>/dev/null || true
+printf 'tail_end\n'
+
+exit "$exit_code"

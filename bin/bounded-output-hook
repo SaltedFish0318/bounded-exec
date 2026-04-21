@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+set -u
+
+[ "${BOUNDED_OUTPUT_DISABLE_HOOK:-0}" = "1" ] && exit 0
+hook_mode="${BOUNDED_OUTPUT_HOOK_MODE:-block}"
+
+payload="$(cat)"
+command_text="$payload"
+codex_bin_dir="${HOME:?HOME is required}/.codex/bin"
+
+if command -v jq >/dev/null 2>&1; then
+  extracted="$(printf '%s' "$payload" | jq -r '.tool_input.command // .tool_input.cmd // .command // empty' 2>/dev/null || true)"
+  [ -n "$extracted" ] && command_text="$extracted"
+else
+  extracted="$(printf '%s' "$payload" | sed -n 's/.*"command"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)"
+  [ -n "$extracted" ] && command_text="$extracted"
+fi
+
+case "$command_text" in
+  *bounded-exec*|*bounded-preview*)
+    exit 0
+    ;;
+esac
+
+risk=""
+case " $command_text " in
+  *" tail -f "*|*" journalctl -f "*|*" docker logs -f "*|*" kubectl logs -f "*)
+    risk="continuous log stream"
+    ;;
+  *" docker build "*|*" docker compose build "*|*" docker logs "*|*" kubectl logs "*|*" journalctl "*|*" systemctl status "*)
+    risk="infrastructure/log command"
+    ;;
+  *" npm install "*|*" pnpm install "*|*" yarn install "*|*" cargo fetch "*|*" pip install "*|*" go mod tidy "*|*" mvn dependency:"*)
+    risk="dependency command"
+    ;;
+  *" mvn "*|*" gradle "*|*" ./gradlew "*|*" bazel "*|*" make "*|*" ninja "*|*" cargo test "*|*" go test "*|*" pytest "*|*" npm test "*|*" pnpm test "*|*" yarn test "*)
+    risk="build/test/lint command"
+    ;;
+  *" cat "*|*" find "*|*" grep -R "*|*" grep -r "*|*" rg "*|*" tar -v"*|*" unzip "*|*" wget "*|*" curl "*)
+    risk="large output command"
+    ;;
+esac
+
+[ -n "$risk" ] || exit 0
+
+label="BOUNDED_OUTPUT_BLOCKED"
+exit_code=2
+if [ "$hook_mode" = "warn" ]; then
+  label="BOUNDED_OUTPUT_HINT"
+  exit_code=0
+fi
+
+cat <<EOF
+$label: detected $risk. Use bounded output instead:
+  $codex_bin_dir/bounded-exec --scope "<smallest useful scope>" -- $command_text
+For files/logs/searches:
+  $codex_bin_dir/bounded-preview tail <file>
+  $codex_bin_dir/bounded-preview scan <file> [query...]
+
+Bypass only when output is known to be small:
+  BOUNDED_OUTPUT_DISABLE_HOOK=1 <command>
+Warn-only mode for the Codex session:
+  set BOUNDED_OUTPUT_HOOK_MODE=warn in the Codex environment or config
+EOF
+
+exit "$exit_code"

@@ -1,0 +1,198 @@
+#!/usr/bin/env bash
+set -u
+
+usage() {
+  cat <<'EOF'
+Usage:
+  bounded-preview [--lines N] head FILE
+  bounded-preview [--lines N] tail FILE
+  bounded-preview [--lines N] grep PATTERN FILE...
+  bounded-preview [--lines N] rg PATTERN [PATH...]
+  bounded-preview sed START:END FILE
+  bounded-preview [--lines N] scan FILE [QUERY...]
+  bounded-preview stat FILE...
+
+Prints bounded previews and writes full grep/rg/scan output to ~/.codex/logs/bounded-output.
+EOF
+}
+
+lines="${BOUNDED_PREVIEW_LINES:-80}"
+log_dir="${BOUNDED_OUTPUT_LOG_DIR:-$HOME/.codex/logs/bounded-output}"
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --lines|-n)
+      [ "$#" -ge 2 ] || { usage >&2; exit 2; }
+      lines="$2"
+      shift 2
+      ;;
+    --help|-h)
+      usage
+      exit 0
+      ;;
+    *)
+      break
+      ;;
+  esac
+done
+
+[ "$#" -gt 0 ] || { usage >&2; exit 2; }
+
+mode="$1"
+shift
+
+mkdir -p "$log_dir" || exit 2
+
+print_summary() {
+  printf 'OP_SUMMARY status=%s kind=preview mode=%s lines=%s log_path=%s\n' "$1" "$mode" "$lines" "${2:-none}"
+}
+
+count_file_lines() {
+  wc -l < "$1" | tr -d '[:space:]'
+}
+
+case "$mode" in
+  head)
+    [ "$#" -eq 1 ] || { usage >&2; exit 2; }
+    print_summary "success"
+    head -n "$lines" "$1"
+    ;;
+  tail)
+    [ "$#" -eq 1 ] || { usage >&2; exit 2; }
+    print_summary "success"
+    tail -n "$lines" "$1"
+    ;;
+  stat)
+    [ "$#" -ge 1 ] || { usage >&2; exit 2; }
+    print_summary "success"
+    wc -l -c "$@"
+    ;;
+  sed)
+    [ "$#" -eq 2 ] || { usage >&2; exit 2; }
+    range="$1"
+    file="$2"
+    start="${range%%:*}"
+    end="${range#*:}"
+    case "$start$end" in
+      *[!0-9]*|'') usage >&2; exit 2 ;;
+    esac
+    if [ "$start" -lt 1 ] || [ "$end" -lt "$start" ]; then
+      printf 'OP_SUMMARY status=failed kind=preview mode=sed reason=invalid-range range=%s lines=%s log_path=none\n' "$range" "$lines"
+      exit 2
+    fi
+    requested=$((end - start + 1))
+    if [ "$requested" -gt "$lines" ]; then
+      printf 'OP_SUMMARY status=failed kind=preview mode=sed reason=range-exceeds-limit range=%s requested_lines=%s limit=%s log_path=none\n' "$range" "$requested" "$lines"
+      printf 'Use a smaller START:END range or increase --lines intentionally.\n'
+      exit 2
+    fi
+    print_summary "success"
+    sed -n "${start},${end}p" "$file"
+    ;;
+  grep)
+    [ "$#" -ge 2 ] || { usage >&2; exit 2; }
+    ts="$(date +%Y%m%dT%H%M%S)"
+    log_path="$log_dir/${ts}_preview_grep_$$.log"
+    pattern="$1"
+    shift
+    grep -RInE "$pattern" "$@" > "$log_path" 2>&1
+    rc=$?
+    if [ "$rc" -eq 0 ] || [ "$rc" -eq 1 ]; then
+      print_summary "success" "$log_path"
+      head -n "$lines" "$log_path"
+      exit 0
+    fi
+    print_summary "failed" "$log_path"
+    head -n "$lines" "$log_path"
+    exit "$rc"
+    ;;
+  scan)
+    [ "$#" -ge 1 ] || { usage >&2; exit 2; }
+    file="$1"
+    shift
+    if [ ! -f "$file" ]; then
+      printf 'OP_SUMMARY status=failed kind=preview mode=scan reason=file-not-found file=%q lines=%s log_path=none\n' "$file" "$lines"
+      exit 2
+    fi
+    ts="$(date +%Y%m%dT%H%M%S)"
+    log_path="$log_dir/${ts}_preview_scan_$$.log"
+    tmp_path="$log_path.tmp"
+    diagnostic_pattern='ERROR|Error|error|FAILED|Failed|failed|FAILURE|Failure|fatal|panic:|Exception|Traceback|timeout|timed out|denied|not found|undefined|unresolved|BUILD FAILED|Compilation failed|npm ERR!'
+    query_matches=0
+    diagnostic_matches=0
+
+    {
+      printf 'bounded-preview scan file=%s started_at=%s\n' "$file" "$(date -Is)"
+      printf 'queries=%s\n\n' "$*"
+    } > "$log_path"
+
+    if [ "$#" -gt 0 ]; then
+      for query in "$@"; do
+        printf 'query_begin pattern=%s\n' "$query" >> "$log_path"
+        grep -n -E "$query" "$file" > "$tmp_path" 2>&1 || true
+        count="$(count_file_lines "$tmp_path")"
+        query_matches=$((query_matches + count))
+        cat "$tmp_path" >> "$log_path"
+        printf 'query_end pattern=%s matches=%s\n\n' "$query" "$count" >> "$log_path"
+      done
+    fi
+
+    printf 'diagnostic_begin pattern=%s\n' "$diagnostic_pattern" >> "$log_path"
+    grep -n -E "$diagnostic_pattern" "$file" > "$tmp_path" 2>&1 || true
+    diagnostic_matches="$(count_file_lines "$tmp_path")"
+    cat "$tmp_path" >> "$log_path"
+    printf 'diagnostic_end matches=%s\n' "$diagnostic_matches" >> "$log_path"
+    rm -f "$tmp_path"
+
+    total_matches=$((query_matches + diagnostic_matches))
+    if [ "$total_matches" -gt 0 ]; then
+      printf 'OP_SUMMARY status=success kind=preview mode=scan lines=%s matches=%s query_matches=%s diagnostic_matches=%s log_path=%q\n' "$lines" "$total_matches" "$query_matches" "$diagnostic_matches" "$log_path"
+      head -n "$lines" "$log_path"
+      exit 0
+    fi
+
+    printf 'OP_SUMMARY status=success kind=preview mode=scan lines=%s matches=0 query_matches=0 diagnostic_matches=0 log_path=%q\n' "$lines" "$log_path"
+    head_lines=$((lines / 2))
+    [ "$head_lines" -lt 1 ] && head_lines=1
+    tail_lines=$((lines - head_lines))
+    [ "$tail_lines" -lt 1 ] && tail_lines=1
+    printf 'sample_head_begin\n'
+    head -n "$head_lines" "$file"
+    printf 'sample_head_end\n'
+    printf 'sample_tail_begin\n'
+    tail -n "$tail_lines" "$file"
+    printf 'sample_tail_end\n'
+    ;;
+  rg)
+    command -v rg >/dev/null 2>&1 || { printf 'OP_SUMMARY status=failed kind=preview mode=rg reason=rg-not-found\n'; exit 127; }
+    [ "$#" -ge 1 ] || { usage >&2; exit 2; }
+    ts="$(date +%Y%m%dT%H%M%S)"
+    log_path="$log_dir/${ts}_preview_rg_$$.log"
+    pattern="$1"
+    shift
+    if [ "$#" -eq 0 ]; then
+      rg --line-number --no-heading --color never "$pattern" > "$log_path" 2>&1
+    else
+      rg --line-number --no-heading --color never "$pattern" "$@" > "$log_path" 2>&1
+    fi
+    rc=$?
+    if [ "$rc" -eq 0 ] || [ "$rc" -eq 1 ]; then
+      print_summary "success" "$log_path"
+      head -n "$lines" "$log_path"
+      exit 0
+    fi
+    print_summary "failed" "$log_path"
+    head -n "$lines" "$log_path"
+    exit "$rc"
+    ;;
+  cat)
+    [ "$#" -eq 1 ] || { usage >&2; exit 2; }
+    print_summary "success"
+    head -n "$lines" "$1"
+    printf '\n[bounded-preview: cat is capped; use tail/sed/grep for more targeted context]\n'
+    ;;
+  *)
+    usage >&2
+    exit 2
+    ;;
+esac

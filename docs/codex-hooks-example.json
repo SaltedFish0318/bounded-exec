@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash -lc 'exec \"$HOME/.codex/bin/bounded-output-hook\"'",
+            "statusMessage": "Checking bounded-output risk"
+          }
+        ]
+      }
+    ]
+  }
+}
