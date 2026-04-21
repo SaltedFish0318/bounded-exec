@@ -62,6 +62,8 @@
 ```
 
 很长的命令会在 `OP_SUMMARY` 中截断；完整命令保存在相邻的 `.meta` 文件里。
+轻量事件历史会追加到 `~/.codex/logs/bounded-output/events.log`，方便以后排查问题或做优化参考。
+如果不想保留这份事件日志，可以设置 `BOUNDED_OUTPUT_LOG_EVENTS=0`。
 
 ## 可选 Hook
 

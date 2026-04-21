@@ -3,11 +3,14 @@ set -u
 
 [ "${BOUNDED_OUTPUT_DISABLE_HOOK:-0}" = "1" ] && exit 0
 hook_mode="${BOUNDED_OUTPUT_HOOK_MODE:-block}"
+event_log_enabled="${BOUNDED_OUTPUT_LOG_EVENTS:-1}"
 
 payload="$(cat)"
 command_text="$payload"
 codex_bin_dir="${HOME:?HOME is required}/.codex/bin"
 max_command_chars="${BOUNDED_OUTPUT_HOOK_COMMAND_CHARS:-220}"
+log_dir="${BOUNDED_OUTPUT_LOG_DIR:-$HOME/.codex/logs/bounded-output}"
+event_log_path="${BOUNDED_OUTPUT_EVENT_LOG:-$log_dir/events.log}"
 
 if command -v jq >/dev/null 2>&1; then
   extracted="$(printf '%s' "$payload" | jq -r '.tool_input.command // .tool_input.cmd // .command // empty' 2>/dev/null || true)"
@@ -81,11 +84,24 @@ if [ "${#command_preview}" -gt "$max_command_chars" ]; then
   command_preview="${command_preview:0:$max_command_chars}..."
 fi
 
+write_event_log() {
+  [ "$event_log_enabled" = "1" ] || return 0
+  mkdir -p "$log_dir" 2>/dev/null || return 0
+  printf '%s\thook\taction=%s\tmode=%s\trisk=%s\tpreview_hint=%s\tcommand=%s\n' \
+    "$(date -Is)" "$1" "$hook_mode" "$risk" "${preview_hint:-none}" "$command_preview" >> "$event_log_path" 2>/dev/null || true
+}
+
 label="BOUNDED_OUTPUT_BLOCKED"
 exit_code=2
 if [ "$hook_mode" = "warn" ]; then
   label="BOUNDED_OUTPUT_HINT"
   exit_code=0
+fi
+
+if [ "$exit_code" -eq 0 ]; then
+  write_event_log "warn"
+else
+  write_event_log "block"
 fi
 
 emit_reason() {

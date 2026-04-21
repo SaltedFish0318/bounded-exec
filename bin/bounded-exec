@@ -16,6 +16,8 @@ tail_lines="${BOUNDED_EXEC_TAIL_LINES:-40}"
 log_dir="${BOUNDED_OUTPUT_LOG_DIR:-$HOME/.codex/logs/bounded-output}"
 preview_bin="${BOUNDED_PREVIEW_BIN:-$HOME/.codex/bin/bounded-preview}"
 max_command_chars="${BOUNDED_EXEC_COMMAND_CHARS:-220}"
+event_log_enabled="${BOUNDED_OUTPUT_LOG_EVENTS:-1}"
+event_log_path="${BOUNDED_OUTPUT_EVENT_LOG:-$log_dir/events.log}"
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -69,6 +71,13 @@ cmd_summary="$cmd_display"
 if [ "${#cmd_summary}" -gt "$max_command_chars" ]; then
   cmd_summary="${cmd_summary:0:$max_command_chars}..."
 fi
+
+write_event_log() {
+  [ "$event_log_enabled" = "1" ] || return 0
+  mkdir -p "$log_dir" 2>/dev/null || return 0
+  printf '%s\texec\tstatus=%s\tkind=%s\tscope=%s\texit_code=%s\telapsed_sec=%s\tlog_path=%s\tcommand=%s\n' \
+    "$(date -Is)" "$1" "$kind" "$scope" "$exit_code" "$elapsed" "$log_path" "$cmd_summary" >> "$event_log_path" 2>/dev/null || true
+}
 
 detect_kind() {
   detection_text=" $* "
@@ -127,11 +136,13 @@ status="success"
 [ "$exit_code" -eq 0 ] || status="failed"
 
 if [ "$status" = "success" ]; then
+  write_event_log "success"
   printf 'OP_SUMMARY status=success kind=%s scope=%q elapsed_sec=%s exit_code=0 log_path=%q command=%q command_truncated=%s meta_path=%q\n' "$kind" "$scope" "$elapsed" "$log_path" "$cmd_summary" "$([ "$cmd_summary" = "$cmd_display" ] && printf false || printf true)" "$meta_path"
   printf 'preview_hint=%q\n' "$preview_bin --lines $tail_lines scan $log_path"
   exit 0
 fi
 
+write_event_log "failed"
 printf 'OP_SUMMARY status=failed kind=%s scope=%q elapsed_sec=%s exit_code=%s log_path=%q command=%q command_truncated=%s meta_path=%q\n' "$kind" "$scope" "$elapsed" "$exit_code" "$log_path" "$cmd_summary" "$([ "$cmd_summary" = "$cmd_display" ] && printf false || printf true)" "$meta_path"
 printf 'first_error=%s\n' "${first_error:-none-detected}"
 printf 'fallback_hint=%q\n' "$preview_bin --lines $tail_lines scan $log_path"

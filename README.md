@@ -62,6 +62,8 @@ Full output is written under:
 ```
 
 Long commands are truncated in `OP_SUMMARY`; the full command is kept in the adjacent `.meta` file.
+Lightweight event history is appended to `~/.codex/logs/bounded-output/events.log` for later troubleshooting and tuning.
+Set `BOUNDED_OUTPUT_LOG_EVENTS=0` to disable that event log.
 
 ## Optional Hook
 
