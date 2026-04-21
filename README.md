@@ -33,6 +33,28 @@ The installer creates symlinks:
 
 This makes the project easy to edit in one place while keeping Codex global paths stable.
 
+## Uninstall
+
+From this project directory:
+
+```sh
+./uninstall.sh
+```
+
+The uninstall script removes only the symlinks that still point at this project:
+
+- `~/.agents/skills/bounded-output`
+- `~/.codex/skills/bounded-output`
+- `~/.codex/bin/bounded-exec`
+- `~/.codex/bin/bounded-preview`
+- `~/.codex/bin/bounded-output-hook`
+
+It does not delete:
+
+- this project directory
+- `~/.codex/logs/bounded-output/`
+- any `*.backup.*` files created by `install.sh`
+
 ## Usage
 
 Run high-output commands through `bounded-exec`:

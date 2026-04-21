@@ -31,6 +31,28 @@
 
 这样可以只维护项目目录里的源码，同时保持 Codex 全局入口稳定。
 
+## 卸载
+
+在项目目录中执行：
+
+```sh
+./uninstall.sh
+```
+
+卸载脚本只会移除当前项目安装出来、且仍然指向本项目的这些软链接：
+
+- `~/.agents/skills/bounded-output`
+- `~/.codex/skills/bounded-output`
+- `~/.codex/bin/bounded-exec`
+- `~/.codex/bin/bounded-preview`
+- `~/.codex/bin/bounded-output-hook`
+
+它不会删除：
+
+- 当前项目目录本身
+- `~/.codex/logs/bounded-output/`
+- `install.sh` 产生的 `*.backup.*` 备份文件
+
 ## 基本用法
 
 高输出命令通过 `bounded-exec` 执行：
