@@ -50,7 +50,8 @@ if [ "$hook_mode" = "warn" ]; then
   exit_code=0
 fi
 
-cat <<EOF
+emit_reason() {
+  cat <<EOF
 $label: detected $risk. Use bounded output instead:
   $codex_bin_dir/bounded-exec --scope "<smallest useful scope>" -- $command_text
 For files/logs/searches:
@@ -62,5 +63,12 @@ Bypass only when output is known to be small:
 Warn-only mode for the Codex session:
   set BOUNDED_OUTPUT_HOOK_MODE=warn in the Codex environment or config
 EOF
+}
+
+if [ "$exit_code" -eq 0 ]; then
+  emit_reason
+else
+  emit_reason >&2
+fi
 
 exit "$exit_code"
