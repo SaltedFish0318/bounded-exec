@@ -15,6 +15,7 @@ kind="auto"
 tail_lines="${BOUNDED_EXEC_TAIL_LINES:-40}"
 log_dir="${BOUNDED_OUTPUT_LOG_DIR:-$HOME/.codex/logs/bounded-output}"
 preview_bin="${BOUNDED_PREVIEW_BIN:-$HOME/.codex/bin/bounded-preview}"
+max_command_chars="${BOUNDED_EXEC_COMMAND_CHARS:-220}"
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -64,6 +65,10 @@ meta_path="$log_path.meta"
 cmd_raw="$*"
 cmd_display="$(printf '%q ' "$@")"
 cmd_display="${cmd_display% }"
+cmd_summary="$cmd_display"
+if [ "${#cmd_summary}" -gt "$max_command_chars" ]; then
+  cmd_summary="${cmd_summary:0:$max_command_chars}..."
+fi
 
 detect_kind() {
   detection_text=" $* "
@@ -122,11 +127,12 @@ status="success"
 [ "$exit_code" -eq 0 ] || status="failed"
 
 if [ "$status" = "success" ]; then
-  printf 'OP_SUMMARY status=success kind=%s scope=%q elapsed_sec=%s exit_code=0 log_path=%q command=%q\n' "$kind" "$scope" "$elapsed" "$log_path" "$cmd_display"
+  printf 'OP_SUMMARY status=success kind=%s scope=%q elapsed_sec=%s exit_code=0 log_path=%q command=%q command_truncated=%s meta_path=%q\n' "$kind" "$scope" "$elapsed" "$log_path" "$cmd_summary" "$([ "$cmd_summary" = "$cmd_display" ] && printf false || printf true)" "$meta_path"
+  printf 'preview_hint=%q\n' "$preview_bin --lines $tail_lines scan $log_path"
   exit 0
 fi
 
-printf 'OP_SUMMARY status=failed kind=%s scope=%q elapsed_sec=%s exit_code=%s log_path=%q command=%q\n' "$kind" "$scope" "$elapsed" "$exit_code" "$log_path" "$cmd_display"
+printf 'OP_SUMMARY status=failed kind=%s scope=%q elapsed_sec=%s exit_code=%s log_path=%q command=%q command_truncated=%s meta_path=%q\n' "$kind" "$scope" "$elapsed" "$exit_code" "$log_path" "$cmd_summary" "$([ "$cmd_summary" = "$cmd_display" ] && printf false || printf true)" "$meta_path"
 printf 'first_error=%s\n' "${first_error:-none-detected}"
 printf 'fallback_hint=%q\n' "$preview_bin --lines $tail_lines scan $log_path"
 if [ -z "$first_error" ] && [ -x "$preview_bin" ]; then

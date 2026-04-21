@@ -61,6 +61,8 @@
 ~/.codex/logs/bounded-output/
 ```
 
+很长的命令会在 `OP_SUMMARY` 中截断；完整命令保存在相邻的 `.meta` 文件里。
+
 ## 可选 Hook
 
 `bin/bounded-output-hook` 是轻量的 Codex `PreToolUse` 兜底。默认会阻止明显高输出风险的裸命令，并提示改用 bounded wrapper。

@@ -67,6 +67,7 @@ The wrapper must:
 - write full stdout/stderr to a timestamped log file
 - print only `OP_SUMMARY` metadata and a small tail/error excerpt
 - include status, command, scope, elapsed seconds, exit code, and log path
+- truncate very long commands in `OP_SUMMARY` and keep the full command in `.meta`
 - print only 1 to 3 summary lines on success
 - on failure, print the first actionable error if detected plus a small tail
 - return the wrapped command exit code

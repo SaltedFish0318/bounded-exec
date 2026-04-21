@@ -61,6 +61,8 @@ Full output is written under:
 ~/.codex/logs/bounded-output/
 ```
 
+Long commands are truncated in `OP_SUMMARY`; the full command is kept in the adjacent `.meta` file.
+
 ## Optional Hook
 
 `bin/bounded-output-hook` is a lightweight PreToolUse helper. By default it blocks obvious high-output bare commands and prints a bounded replacement command.
