@@ -1,5 +1,7 @@
 # bounded-output Codex Skill
 
+[中文文档](README.zh-CN.md)
+
 A global Codex skill and helper scripts for low-token execution of noisy commands.
 
 It keeps full command output on disk while returning compact summaries to the Codex conversation. The goal is not to block work, but to preserve execution continuity without flooding context with large logs.
