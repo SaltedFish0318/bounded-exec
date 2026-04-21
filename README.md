@@ -49,11 +49,15 @@ The uninstall script removes only the symlinks that still point at this project:
 - `~/.codex/bin/bounded-preview`
 - `~/.codex/bin/bounded-output-hook`
 
+It also removes the bounded-output `PreToolUse` Bash hook entry from `~/.codex/hooks.json` when that exact hook entry is present.
+
 It does not delete:
 
 - this project directory
 - `~/.codex/logs/bounded-output/`
 - any `*.backup.*` files created by `install.sh`
+- manual bounded-output edits in `~/.codex/AGENTS.md`
+- manual bounded-output entries in `~/.codex/config.toml`
 
 ## Usage
 
